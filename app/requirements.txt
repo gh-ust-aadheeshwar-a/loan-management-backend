@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+
+pydantic
+
+motor
+pymongo
+
+python-dotenv
+
+pytest
+pytest-asyncio
+
+python-jose==3.3.0
+bcrypt==4.1.2
+passlib==1.7.4

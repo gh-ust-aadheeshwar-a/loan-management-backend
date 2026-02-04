@@ -1,0 +1,26 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from app.services.admin_auth_service import AdminAuthService
+
+router = APIRouter(prefix="/auth/admin", tags=["Auth - Admin"])
+service = AdminAuthService()
+
+@router.post("/login")
+async def admin_login(
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
+    try:
+        token = await service.login_admin(
+            username=form_data.username,
+            password=form_data.password
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
