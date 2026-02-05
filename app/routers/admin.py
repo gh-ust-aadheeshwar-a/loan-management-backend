@@ -3,6 +3,8 @@ from app.auth.dependencies import get_current_user, AuthContext
 from app.enums.role import Role
 from app.services.admin_service import AdminService
 from app.schemas.admin_manager import CreateManagerRequest
+from app.schemas.admin_loan_escalation import AdminLoanDecisionRequest
+
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 service = AdminService()
@@ -116,3 +118,25 @@ async def decide_escalated_loan(
         auth.user_id
     )
     return {"message": "Decision recorded"}
+
+
+@router.post("/loans/{loan_id}/decision")
+async def decide_escalated_loan(
+    loan_id: str,
+    payload: AdminLoanDecisionRequest,
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role != Role.ADMIN:
+        raise HTTPException(403)
+
+    try:
+        await service.decide_escalated_loan(
+            admin_id=auth.user_id,
+            loan_id=loan_id,
+            decision=payload.decision,
+            reason=payload.reason
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+    return {"message": "Admin decision applied"}

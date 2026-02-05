@@ -7,6 +7,7 @@ from app.schemas.auth_user import (
     TokenResponse
 )
 from app.services.user_service import UserService
+from app.schemas.auth_user import UserLoginRequest
 
 router = APIRouter(
     prefix="/auth/user",
@@ -74,5 +75,21 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e)
         )
+
+    return TokenResponse(access_token=token)
+
+
+from app.schemas.auth_user import UserLoginRequest
+
+@router.post("/login-aadhaar", response_model=TokenResponse)
+async def login_with_aadhaar(payload: UserLoginRequest):
+    try:
+        token = await service.login_user_with_aadhaar(
+            aadhaar=payload.aadhaar,
+            password=payload.password,
+            digi_pin=payload.digi_pin
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
 
     return TokenResponse(access_token=token)

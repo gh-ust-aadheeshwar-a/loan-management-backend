@@ -92,3 +92,62 @@ class UserService:
         }
 
         await self.repo.update_kyc(user_id, update_data)
+
+
+    async def set_digi_pin(self, user_id: str, digi_pin: str):
+        user = await self.repo.find_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+
+        if user["approval_status"] != UserApprovalStatus.APPROVED:
+            raise ValueError("User not approved")
+
+        if user.get("digi_pin_hash"):
+            raise ValueError("Digi PIN already set")
+
+        await self.repo.collection.update_one(
+            {"_id": user["_id"]},
+            {
+                "$set": {
+                    "digi_pin_hash": hash_password(digi_pin),
+                    "digi_pin_set_at": datetime.utcnow()
+                }
+            }
+        )
+
+
+
+
+    async def login_user_with_aadhaar(
+        self,
+        aadhaar: str,
+        password: str | None,
+        digi_pin: str | None
+    ):
+        user = await self.repo.collection.find_one({"aadhaar": aadhaar})
+        if not user:
+            raise ValueError("Invalid Aadhaar or credentials")
+
+        if user["approval_status"] != UserApprovalStatus.APPROVED:
+            raise ValueError("User not approved")
+
+        # 🔐 Password login
+        if password:
+            if not verify_password(password, user["password_hash"]):
+                raise ValueError("Invalid Aadhaar or password")
+
+        # 🔐 Digi PIN login
+        elif digi_pin:
+            if not user.get("digi_pin_hash"):
+                raise ValueError("Digi PIN not set")
+
+            if not verify_password(digi_pin, user["digi_pin_hash"]):
+                raise ValueError("Invalid Digi PIN")
+
+        else:
+            raise ValueError("Password or Digi PIN required")
+
+        return create_access_token(
+            subject=str(user["_id"]),
+            role=Role.USER
+        )

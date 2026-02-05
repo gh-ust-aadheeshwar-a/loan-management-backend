@@ -19,3 +19,10 @@ class UserLoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+
+class UserLoginRequest(BaseModel):
+    aadhaar: str
+    password: Optional[str] = None
+    digi_pin: Optional[str] = None

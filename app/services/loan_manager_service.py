@@ -1,14 +1,22 @@
+from datetime import datetime
 from app.repositories.loan_application_repository import LoanApplicationRepository
 from app.repositories.audit_log_repository import AuditLogRepository
+from app.repositories.user_repository import UserRepository
+from app.services.cibil_service import CIBILService
 from app.enums.loan import LoanApplicationStatus, SystemDecision
 from app.schemas.loan_decision import LoanDecision
-from datetime import datetime
+
 
 class LoanManagerService:
     def __init__(self):
         self.loan_repo = LoanApplicationRepository()
         self.audit_repo = AuditLogRepository()
+        self.user_repo = UserRepository()
+        self.cibil_service = CIBILService()
 
+    # =====================================================
+    # MANUAL DECISION (ONLY FOR MANUAL_REVIEW)
+    # =====================================================
     async def decide_loan(
         self,
         loan_id: str,
@@ -19,12 +27,13 @@ class LoanManagerService:
         loan = await self.loan_repo.find_by_id(loan_id)
         if not loan:
             raise ValueError("Loan application not found")
-        
-        # 🔒 IMPORTANT: enforce system decision rule
+
+        # 🔒 Enforce system decision rule
         if loan["system_decision"] != SystemDecision.MANUAL_REVIEW:
             raise ValueError(
-                "Manual decision only allowed for MANUAL_REVIEW loans"
+                "Manual decision allowed only for MANUAL_REVIEW loans"
             )
+
         if loan["status"] not in [
             LoanApplicationStatus.PENDING,
             LoanApplicationStatus.MANUAL_REVIEW
@@ -47,7 +56,6 @@ class LoanManagerService:
             reason=reason
         )
 
-        # 🧾 Audit log
         await self.audit_repo.create({
             "actor_id": manager_id,
             "actor_role": "LOAN_MANAGER",
@@ -58,6 +66,9 @@ class LoanManagerService:
             "timestamp": datetime.utcnow()
         })
 
+    # =====================================================
+    # LIST LOANS (DASHBOARD)
+    # =====================================================
     async def list_loans(self, system_decision=None):
         query = {}
         if system_decision:
@@ -78,10 +89,12 @@ class LoanManagerService:
             })
 
         return loans
-    
+
+    # =====================================================
+    # AUTO APPROVED — CONFIRM ONLY
+    # =====================================================
     async def confirm_auto_approved(self, loan_id: str, manager_id: str):
         loan = await self.loan_repo.find_by_id(loan_id)
-
         if not loan:
             raise ValueError("Loan not found")
 
@@ -89,27 +102,55 @@ class LoanManagerService:
             raise ValueError("Loan is not auto-approved")
 
         await self.loan_repo.update_decision(
-            loan_id,
+            loan_id=loan_id,
             status=LoanApplicationStatus.APPROVED,
             decided_by=manager_id,
             reason=None
         )
 
+        await self.audit_repo.create({
+            "actor_id": manager_id,
+            "actor_role": "LOAN_MANAGER",
+            "action": "LOAN_AUTO_APPROVED_CONFIRMED",
+            "entity_type": "LOAN",
+            "entity_id": loan_id,
+            "remarks": None,
+            "timestamp": datetime.utcnow()
+        })
+
+    # =====================================================
+    # AUTO REJECTED — SYSTEM FINAL
+    # =====================================================
     async def confirm_auto_rejected(self, loan_id: str, manager_id: str):
         loan = await self.loan_repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan not found")
 
         if loan["system_decision"] != SystemDecision.AUTO_REJECTED:
             raise ValueError("Loan not auto-rejected")
 
         await self.loan_repo.update_decision(
-            loan_id,
+            loan_id=loan_id,
             status=LoanApplicationStatus.REJECTED,
             decided_by=manager_id,
             reason="Auto rejected by system"
         )
+
+        await self.audit_repo.create({
+            "actor_id": manager_id,
+            "actor_role": "LOAN_MANAGER",
+            "action": "LOAN_AUTO_REJECTED",
+            "entity_type": "LOAN",
+            "entity_id": loan_id,
+            "remarks": "Auto rejected by system",
+            "timestamp": datetime.utcnow()
+        })
+
+    # =====================================================
+    # ESCALATE TO ADMIN (MANUAL_REVIEW ONLY)
+    # =====================================================
     async def escalate_to_admin(self, loan_id: str, reason: str, manager_id: str):
         loan = await self.loan_repo.find_by_id(loan_id)
-
         if not loan:
             raise ValueError("Loan not found")
 
@@ -120,9 +161,10 @@ class LoanManagerService:
             {"_id": loan["_id"]},
             {
                 "$set": {
-                    "status": "ESCALATED",
+                    "status": LoanApplicationStatus.ESCALATED,
                     "escalated": True,
-                    "escalated_reason": reason
+                    "escalated_reason": reason,
+                    "escalated_at": datetime.utcnow()
                 }
             }
         )
@@ -137,5 +179,51 @@ class LoanManagerService:
             "timestamp": datetime.utcnow()
         })
 
+    # =====================================================
+    # LOAN CLOSURE → CIBIL UPDATE (EVENT-BASED)
+    # =====================================================
+    async def close_loan(self, loan_id: str, manager_id: str):
+        loan = await self.loan_repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan not found")
 
+        if loan["status"] != LoanApplicationStatus.APPROVED:
+            raise ValueError("Only active loans can be closed")
 
+        # ✅ Close loan
+        await self.loan_repo.collection.update_one(
+            {"_id": loan["_id"]},
+            {
+                "$set": {
+                    "status": LoanApplicationStatus.CLOSED,
+                    "closed_at": datetime.utcnow()
+                }
+            }
+        )
+
+        # 🧠 EVENT-BASED CIBIL CALCULATION
+        cibil_score = self.cibil_service.calculate({
+            "missed_emis": loan.get("missed_emis", 0),
+            "late_payments": loan.get("late_payments", 0),
+            "loan_closed_clean": True
+        })
+
+        await self.user_repo.collection.update_one(
+            {"_id": loan["user_id"]},
+            {
+                "$set": {
+                    "cibil_score": cibil_score,
+                    "cibil_updated_at": datetime.utcnow()
+                }
+            }
+        )
+
+        await self.audit_repo.create({
+            "actor_id": manager_id,
+            "actor_role": "LOAN_MANAGER",
+            "action": "LOAN_CLOSED",
+            "entity_type": "LOAN",
+            "entity_id": loan_id,
+            "remarks": f"CIBIL updated to {cibil_score}",
+            "timestamp": datetime.utcnow()
+        })

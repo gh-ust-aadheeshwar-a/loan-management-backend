@@ -7,7 +7,7 @@ from app.repositories.manager_repository import ManagerRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.loan_application_repository import LoanApplicationRepository
 from app.repositories.audit_log_repository import AuditLogRepository
-
+from app.enums.loan import LoanApplicationStatus
 
 class AdminService:
     def __init__(self):
@@ -171,3 +171,33 @@ class AdminService:
             "remarks": reason,
             "timestamp": datetime.utcnow()
         })
+
+
+
+
+    async def decide_escalated_loan(
+        self,
+        admin_id: str,
+        loan_id: str,
+        decision,
+        reason: str | None
+    ):
+        loan = await LoanApplicationRepository().find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan not found")
+
+        if not loan.get("is_escalated"):
+            raise ValueError("Loan not escalated")
+
+        new_status = (
+            LoanApplicationStatus.APPROVED
+            if decision == "APPROVE"
+            else LoanApplicationStatus.REJECTED
+        )
+
+        await LoanApplicationRepository().update_decision(
+            loan_id,
+            new_status,
+            admin_id,
+            reason
+        )
