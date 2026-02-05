@@ -2,6 +2,8 @@ from datetime import datetime
 from app.db.mongodb import db
 from app.models.loan_application import LoanApplication
 from bson import ObjectId
+from app.enums.loan import LoanApplicationStatus
+
 
 class LoanApplicationRepository:
     def __init__(self):
@@ -38,3 +40,14 @@ class LoanApplicationRepository:
                 }
             }
         )
+    async def count_active_loans(self, user_id: str) -> int:
+        return await self.collection.count_documents({
+            "user_id": ObjectId(user_id),
+            "status": {
+                "$in": [
+                    LoanApplicationStatus.APPROVED,
+                    LoanApplicationStatus.MANUAL_REVIEW,
+                    LoanApplicationStatus.PENDING
+                ]
+            }
+        })

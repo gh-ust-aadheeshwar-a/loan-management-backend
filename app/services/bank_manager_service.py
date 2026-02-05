@@ -3,10 +3,13 @@ from app.repositories.user_repository import UserRepository
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.enums.user import KYCStatus, UserApprovalStatus
 from app.schemas.user_decision import UserDecision
+from app.repositories.loan_application_repository import LoanApplicationRepository
+
 
 class BankManagerService:
     def __init__(self):
         self.user_repo = UserRepository()
+        self.loan_repo = LoanApplicationRepository()
         self.audit_repo = AuditLogRepository()
 
     async def decide_user(
@@ -100,3 +103,30 @@ class BankManagerService:
             "updated_at": user.get("updated_at").isoformat()
             if user.get("updated_at") else None
         }
+    
+    async def delete_user(self, manager_id: str, user_id: str, reason: str):
+        user = await self.user_repo.find_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+
+        if user["approval_status"] == UserApprovalStatus.DELETED:
+            raise ValueError("User already deleted")
+
+        # 🛑 SAFETY CHECK — active loans
+        active_loans = await self.loan_repo.count_active_loans(user_id)
+        if active_loans > 0:
+            raise ValueError("User has active loans")
+
+        await self.user_repo.soft_delete_user(  
+            user_id=user_id,
+            deleted_by=manager_id
+        )
+
+        await self.audit_repo.create({
+            "actor_id": manager_id,
+            "actor_role": "BANK_MANAGER",
+            "action": "USER_DELETED",
+            "entity_type": "USER",
+            "entity_id": user_id,
+            "remarks": reason
+        })

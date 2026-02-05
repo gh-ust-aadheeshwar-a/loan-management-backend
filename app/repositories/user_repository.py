@@ -58,6 +58,19 @@ class UserRepository:
 
         cursor = self.collection.find(query).sort("created_at", -1)
         return cursor
+    
+    async def soft_delete_user(self, user_id: str, deleted_by: str):
+        return await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {
+                "$set": {
+                    "approval_status": "DELETED",
+                    "is_active": False,
+                    "deleted_by": ObjectId(deleted_by),
+                    "deleted_at": datetime.utcnow()
+                }
+            }
+        )
 
 
     
