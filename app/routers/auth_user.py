@@ -1,13 +1,36 @@
-from fastapi import APIRouter, HTTPException, status, Depends
-from app.schemas.auth_user import UserRegisterRequest, UserRegisterResponse, UserLoginRequest, TokenResponse
-from app.services.user_service import UserService
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 
-router = APIRouter(prefix="/auth/user", tags=["Auth - User"])
+from app.schemas.auth_user import (
+    UserRegisterRequest,
+    UserRegisterResponse,
+    TokenResponse
+)
+from app.services.user_service import UserService
+
+router = APIRouter(
+    prefix="/auth/user",
+    tags=["Auth - User"]
+)
+
 service = UserService()
 
+# =========================
+# USER REGISTRATION
+# =========================
+@router.post(
+    "/register",
+    response_model=UserRegisterResponse,
+    status_code=201,
+    summary="User Registration",
+    description="""
+Register a **new user** using phone number and password.
 
-@router.post("/register", response_model=UserRegisterResponse, status_code=201)
+- Creates a user in `PENDING` approval state
+- KYC must be completed after registration
+- Bank Manager approval is required before loan access
+"""
+)
 async def register_user(payload: UserRegisterRequest):
     try:
         user_id = await service.register_user(payload)
@@ -22,7 +45,22 @@ async def register_user(payload: UserRegisterRequest):
         message="Registration successful. Please complete KYC."
     )
 
-@router.post("/login", response_model=TokenResponse)
+# =========================
+# USER LOGIN
+# =========================
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="User Login",
+    description="""
+Authenticate an **end user** using phone number and password.
+
+Returns a JWT access token containing:
+- role = `USER`
+
+Use this token in Swagger **Authorize 🔐** to access user-protected APIs.
+"""
+)
 async def login_user(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):

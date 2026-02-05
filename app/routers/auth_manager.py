@@ -2,10 +2,29 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.services.manager_auth_service import ManagerAuthService
 
-router = APIRouter(prefix="/auth/manager", tags=["Auth - Manager"])
+router = APIRouter(
+    prefix="/auth/manager",
+    tags=["Auth - Manager"]
+)
+
 service = ManagerAuthService()
 
-@router.post("/login")
+@router.post(
+    "/login",
+    summary="Manager Login (Bank / Loan)",
+    description="""
+Authenticate a **Manager** using manager ID and password.
+
+This endpoint is used by:
+- **Bank Manager**
+- **Loan Manager**
+
+Returns a JWT access token containing:
+- role = `BANK_MANAGER` or `LOAN_MANAGER`
+
+Use this token in Swagger **Authorize 🔐** to access manager-protected APIs.
+"""
+)
 async def manager_login(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):

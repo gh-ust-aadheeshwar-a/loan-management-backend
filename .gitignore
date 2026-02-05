@@ -13,3 +13,12 @@ venv/
 
 # OS
 .DS_Store
+
+bankenv
+*.log
+*.sqlite3
+media/
+staticfiles/
+*.pot
+*.mo
+local_settings.py
