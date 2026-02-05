@@ -8,6 +8,10 @@ class LoanApplicationCreateRequest(BaseModel):
     reason: str
     income_slip_url: HttpUrl
 
+    monthly_income: float
+    occupation: str
+    pending_emis: int = 0
+    previous_loans: int = 0
 class LoanApplicationResponse(BaseModel):
     loan_id: str
     status: str
