@@ -21,3 +21,4 @@ class ManagerUpdateRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     role: Optional[Role] = None
+

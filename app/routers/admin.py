@@ -103,21 +103,21 @@ async def escalated_loans(auth: AuthContext = Depends(get_current_user)):
         raise HTTPException(403)
     return await service.get_escalated_loans()
 
-@router.post("/loans/{loan_id}/escalated-decision")
-async def decide_escalated_loan(
-    loan_id: str,
-    payload: dict,
-    auth: AuthContext = Depends(get_current_user)
-):
-    if auth.role != Role.ADMIN:
-        raise HTTPException(403)
-    await service.decide_escalated_loan(
-        loan_id,
-        payload["decision"],
-        payload.get("reason"),
-        auth.user_id
-    )
-    return {"message": "Decision recorded"}
+# @router.post("/loans/{loan_id}/escalated-decision")
+# async def decide_escalated_loan(
+#     loan_id: str,
+#     payload: dict,
+#     auth: AuthContext = Depends(get_current_user)
+# ):
+#     if auth.role != Role.ADMIN:
+#         raise HTTPException(403)
+#     await service.decide_escalated_loan(
+#         loan_id,
+#         payload["decision"],
+#         payload.get("reason"),
+#         auth.user_id
+#     )
+#     return {"message": "Decision recorded"}
 
 
 @router.post("/loans/{loan_id}/decision")

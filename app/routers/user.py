@@ -39,3 +39,12 @@ async def submit_kyc(
         )
 
     return {"message": "KYC completed successfully"}
+
+@router.get("/me/details")
+async def get_my_full_details(
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role != Role.USER:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return await service.get_user_full_details(auth.user_id)

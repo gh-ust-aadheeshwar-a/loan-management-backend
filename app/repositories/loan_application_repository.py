@@ -51,3 +51,9 @@ class LoanApplicationRepository:
                 ]
             }
         })
+    async def find_escalated_loans(self):
+        cursor = self.collection.find({
+            "status": "ESCALATED",
+            "escalated": True
+        }).sort("applied_at", -1)
+        return cursor

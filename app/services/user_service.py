@@ -151,3 +151,39 @@ class UserService:
             subject=str(user["_id"]),
             role=Role.USER
         )
+    async def get_user_full_details(self, user_id: str):
+        user = await self.repo.find_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+
+        return {
+            # 🔹 Registration Details
+            "user_id": str(user["_id"]),
+            "name": user.get("name"),
+            "phone": user.get("phone"),
+            "created_at": user.get("created_at").isoformat(),
+
+            # 🔹 Status
+            "kyc_status": user.get("kyc_status"),
+            "approval_status": user.get("approval_status"),
+            "is_minor": user.get("is_minor", False),
+
+            # 🔹 KYC Details (safe exposure)
+            "kyc": {
+                "aadhaar": self._mask_aadhaar(user.get("aadhaar")),
+                "pan": self._mask_pan(user.get("pan")),
+                "dob": user.get("dob").isoformat() if user.get("dob") else None,
+                "gender": user.get("gender"),
+                "occupation": user.get("occupation"),
+                "address": user.get("address")
+            } if user.get("kyc_status") == "COMPLETED" else None
+        }
+    def _mask_aadhaar(self, aadhaar: str | None):
+        if not aadhaar:
+            return None
+        return "XXXX-XXXX-" + aadhaar[-4:]
+
+    def _mask_pan(self, pan: str | None):
+        if not pan:
+            return None
+        return pan[:2] + "XXXXX" + pan[-1]

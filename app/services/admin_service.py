@@ -148,11 +148,16 @@ class AdminService:
         reason: str | None,
         admin_id: str
     ):
+        new_status = (
+            "ADMIN_APPROVED" if decision == "APPROVE"
+            else "ADMIN_REJECTED"
+        )
         result = await self.loan_repo.collection.update_one(
-            {"_id": ObjectId(loan_id)},
+            {"_id": ObjectId(loan_id), "status":"ESCALATED"},
             {
                 "$set": {
                     "status": decision,
+                    "admin_decision": decision,
                     "admin_decision_reason": reason,
                     "admin_decided_at": datetime.utcnow()
                 }

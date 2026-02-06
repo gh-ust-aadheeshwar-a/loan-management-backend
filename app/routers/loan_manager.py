@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth.dependencies import get_current_user, AuthContext
 from app.enums.role import Role
-from app.schemas.loan_decision import LoanDecisionRequest
+from app.schemas.loan_decision import LoanDecisionRequest,LoanFinalizeRequest
 from app.services.loan_manager_service import LoanManagerService
 from app.enums.loan import SystemDecision
 
@@ -84,3 +84,42 @@ async def escalate_loan(
     )
 
     return {"message": "Loan escalated to admin"}
+
+@router.get("/applications/escalated")
+async def get_escalated_loans(
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role != Role.LOAN_MANAGER:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return await service.list_escalated_loans()
+
+@router.post("/applications/{loan_id}/finalize")
+async def finalize_loan(
+    loan_id: str,
+    payload: LoanFinalizeRequest,
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role != Role.LOAN_MANAGER:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        await service.finalize_loan(
+            loan_id=loan_id,
+            manager_id=auth.user_id,
+            interest_rate=payload.interest_rate,
+            tenure_months=payload.tenure_months
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"message": "Loan finalized successfully"}
+
+@router.get("/applications/finalizable")
+async def get_finalizable_loans(
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role != Role.LOAN_MANAGER:
+        raise HTTPException(403)
+
+    return await service.list_loans_ready_for_finalization()

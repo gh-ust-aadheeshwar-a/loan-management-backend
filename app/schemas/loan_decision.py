@@ -9,3 +9,7 @@ class LoanDecision(str, Enum):
 class LoanDecisionRequest(BaseModel):
     decision: LoanDecision
     reason: Optional[str] = None
+
+class LoanFinalizeRequest(BaseModel):
+    interest_rate: float
+    tenure_months: int 

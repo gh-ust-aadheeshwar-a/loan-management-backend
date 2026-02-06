@@ -5,7 +5,9 @@ from app.repositories.user_repository import UserRepository
 from app.services.cibil_service import CIBILService
 from app.enums.loan import LoanApplicationStatus, SystemDecision
 from app.schemas.loan_decision import LoanDecision
-
+from bson import ObjectId, Decimal128
+from app.repositories.loan_repository import LoanRepository
+from app.services.loan_application_service import calculate_emi
 
 class LoanManagerService:
     def __init__(self):
@@ -13,6 +15,7 @@ class LoanManagerService:
         self.audit_repo = AuditLogRepository()
         self.user_repo = UserRepository()
         self.cibil_service = CIBILService()
+        self.final_loan_repo = LoanRepository()
 
     # =====================================================
     # MANUAL DECISION (ONLY FOR MANUAL_REVIEW)
@@ -227,3 +230,94 @@ class LoanManagerService:
             "remarks": f"CIBIL updated to {cibil_score}",
             "timestamp": datetime.utcnow()
         })
+
+    async def list_escalated_loans(self):
+        cursor = await self.loan_repo.find_escalated_loans()
+        loans = []
+        async for loan in cursor:
+            loans.append({
+                "loan_id": str(loan["_id"]),
+                "user_id": str(loan["user_id"]),
+                "loan_amount": str(loan["loan_amount"]),
+                "cibil_score": loan.get("cibil_score"),
+                "system_decision": loan.get("system_decision"),
+                "status": loan.get("status"),
+                "escalated_reason": loan.get("escalated_reason"),
+                "applied_at": loan.get("applied_at")
+            })
+
+        return loans
+    async def list_loans_ready_for_finalization(self):
+        cursor = self.loan_repo.collection.find({
+            "status": "ADMIN_APPROVED"
+        })
+
+        loans = []
+        async for loan in cursor:
+            loans.append({
+                "loan_id": str(loan["_id"]),
+                "user_id": str(loan["user_id"]),
+                "loan_amount": str(loan["loan_amount"]),
+                "cibil_score": loan.get("cibil_score"),
+                "system_decision": loan.get("system_decision"),
+                "admin_decision": loan.get("admin_decision"),
+                "admin_decision_reason": loan.get("admin_decision_reason"),
+                "status": loan["status"]
+            })
+        return loans
+
+    async def finalize_loan(
+    self,
+    loan_id: str,
+    manager_id: str,
+    interest_rate: float,
+    tenure_months: int
+):
+        loan_app = await self.loan_repo.find_by_id(loan_id)
+        if not loan_app:
+            raise ValueError("Loan application not found")
+
+        if loan_app["status"] != "ADMIN_APPROVED":
+            raise ValueError(
+                "Loan can be finalized only after admin approval"
+        )
+
+
+        emi = calculate_emi(
+            float(loan_app["loan_amount"]),
+            tenure_months,
+            interest_rate
+        )
+
+        loan_doc = {
+            "loan_application_id": loan_app["_id"],
+            "user_id": loan_app["user_id"],
+            "approved_by": ObjectId(manager_id),
+            "approved_role": "LOAN_MANAGER",
+            "principal_amount": loan_app["loan_amount"],
+            "interest_rate": Decimal128(str(interest_rate)),
+            "tenure_months": tenure_months,
+            "emi_amount": Decimal128(str(emi)),
+            "loan_status": "ACTIVE",
+            "disbursed_at": None,
+            "closed_at": None,
+            "created_at": datetime.utcnow()
+        }
+
+        await self.final_loan_repo.create(loan_doc)
+
+        await self.loan_repo.collection.update_one(
+            {"_id": loan_app["_id"]},
+            {"$set": {"status": "FINALIZED"}}
+        )
+
+        await self.audit_repo.create({
+            "actor_id": ObjectId(manager_id),
+            "actor_role": "LOAN_MANAGER",
+            "action": "LOAN_FINALIZED",
+            "entity_type": "LOAN",
+            "entity_id": loan_app["_id"],
+            "remarks": None,
+            "timestamp": datetime.utcnow()
+        })
+
