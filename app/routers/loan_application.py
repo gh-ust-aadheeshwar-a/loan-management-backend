@@ -1,16 +1,18 @@
 from fastapi import APIRouter, Header, HTTPException, status, Depends
+
 from app.schemas.loan_application import (
     LoanApplicationCreateRequest,
     LoanApplicationResponse,
     LoanApplicationDetailResponse
 )
+from app.schemas.loan_decision_query import LoanDecisionResponse
 from app.services.loan_application_service import LoanApplicationService
 from app.auth.dependencies import get_current_user, AuthContext
 from app.enums.role import Role
-from app.schemas.loan_decision_query import LoanDecisionResponse
 
 router = APIRouter(prefix="/loans", tags=["Loans"])
 service = LoanApplicationService()
+
 
 @router.post("", response_model=LoanApplicationResponse, status_code=201)
 async def apply_loan(
@@ -47,19 +49,17 @@ async def apply_loan(
     )
 
 
-@router.get("/loans/{loan_id}")
+@router.get("/{loan_id}")
 async def get_loan(
     loan_id: str,
     auth: AuthContext = Depends(get_current_user)
 ):
     if auth.role != Role.USER:
-        raise HTTPException(403)
+        raise HTTPException(status_code=403)
 
-    # router
     return await service.get_loan_application(loan_id)
 
-<<<<<<< HEAD
-=======
+
 @router.get(
     "/{loan_id}/decision",
     response_model=LoanDecisionResponse,
@@ -85,4 +85,3 @@ async def get_loan_decision(
     decision.pop("user_id")
 
     return decision
->>>>>>> 47d395c (rule config decision query api)
