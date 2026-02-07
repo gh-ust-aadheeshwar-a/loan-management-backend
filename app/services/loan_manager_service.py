@@ -8,6 +8,7 @@ from app.repositories.user_repository import UserRepository
 from app.services.cibil_service import CIBILService
 from app.services.loan_application_service import calculate_emi
 from app.enums.loan import LoanApplicationStatus, SystemDecision
+from app.schemas.loan_decision import LoanDecision
 
 
 class LoanManagerService:
@@ -19,6 +20,116 @@ class LoanManagerService:
         self.user_repo = UserRepository()
         self.cibil_service = CIBILService()
     
+    
+    async def decide_loan(
+        self,
+        loan_id: str,
+        manager_id: str,
+        decision: LoanDecision,
+        reason: str | None
+    ):
+        loan = await self.loan_app_repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan application not found")
+
+        if loan["system_decision"] != SystemDecision.MANUAL_REVIEW:
+            raise ValueError("Only MANUAL_REVIEW loans can be decided manually")
+
+        if decision.name == "REJECT" and not reason:
+            raise ValueError("Rejection reason is mandatory")
+        
+        new_status = (
+        LoanApplicationStatus.APPROVED
+        if decision.name == "APPROVE"
+        else LoanApplicationStatus.REJECTED
+        )
+
+        await self.loan_app_repo.collection.update_one(
+            {"_id": ObjectId(loan_id)},
+            {
+                "$set": {
+                    "status": new_status,
+                    "decided_by": manager_id,
+                    "decision_reason": reason,
+                    "decided_at": datetime.utcnow()
+                }
+            }
+        )
+
+        await self.audit_repo.create({
+            "actor_id": manager_id,
+            "actor_role": "LOAN_MANAGER",
+            "action": f"LOAN_{decision.name}",
+            "entity_type": "LOAN_APPLICATION",
+            "entity_id": loan_id,
+            "remarks": reason,
+            "timestamp": datetime.utcnow()
+        })
+
+    async def confirm_auto_approved(self, loan_id: str, manager_id: str):
+        loan = await self.loan_app_repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan not found")
+
+        if loan["system_decision"] != SystemDecision.AUTO_APPROVED:
+            raise ValueError("Loan is not auto-approved")
+
+        await self.loan_app_repo.collection.update_one(
+            {"_id": ObjectId(loan_id)},
+            {
+                "$set": {
+                    "status": LoanApplicationStatus.APPROVED,
+                    "confirmed_by": manager_id,
+                    "confirmed_at": datetime.utcnow()
+                }
+            }
+        )
+
+    async def confirm_auto_rejected(self, loan_id: str, manager_id: str):
+        loan = await self.loan_app_repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan not found")
+
+        if loan["system_decision"] != SystemDecision.AUTO_REJECTED:
+            raise ValueError("Loan is not auto-rejected")
+
+        await self.loan_app_repo.collection.update_one(
+            {"_id": ObjectId(loan_id)},
+            {
+                "$set": {
+                    "status": LoanApplicationStatus.REJECTED,
+                    "confirmed_by": manager_id,
+                    "confirmed_at": datetime.utcnow(),
+                    "decision_reason": "Auto rejected by system"
+                }
+            }
+        )
+
+
+    async def escalate_to_admin(self, loan_id: str, reason: str, manager_id: str):
+        loan = await self.loan_app_repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan not found")
+
+        if loan["system_decision"] != SystemDecision.MANUAL_REVIEW:
+            raise ValueError("Only MANUAL_REVIEW loans can be escalated")
+
+        await self.loan_app_repo.collection.update_one(
+            {"_id": ObjectId(loan_id)},
+            {
+                "$set": {
+                    "status": LoanApplicationStatus.ADMIN_REVIEW,
+                    "escalated": True,
+                    "escalated_reason": reason,
+                    "escalated_by": manager_id,
+                    "escalated_at": datetime.utcnow()
+                }
+            }
+        )
+
+
+    
+
         # =====================================================
     # LIST ALL LOAN APPLICATIONS (LOAN MANAGER DASHBOARD)
     # =====================================================
@@ -89,8 +200,8 @@ class LoanManagerService:
 
         emi_amount = calculate_emi(
             principal,
-            interest_rate,
-            tenure_months
+            tenure_months,
+            interest_rate
         )
 
         # 1️⃣ Create ACTIVE LOAN
