@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth.dependencies import get_current_user, AuthContext
 from app.enums.role import Role
-from app.schemas.loan_decision import LoanDecisionRequest,LoanFinalizeRequest
+from app.schemas.loan_decision import LoanDecisionRequest,LoanFinalizeRequest,LoanEscalationRequest
 from app.services.loan_manager_service import LoanManagerService
 from app.enums.loan import SystemDecision
+from app.schemas.loan_decision import LoanAutoDecisionRequest
 
 router = APIRouter(
     prefix="/manager/loan",
@@ -46,32 +47,33 @@ async def decide_loan(
 
     return {"message": f"Loan {payload.decision.lower()}ed successfully"}
 
-@router.post("/applications/{loan_id}/confirm-auto")
-async def confirm_auto(
+@router.post("/applications/{loan_id}/auto-decision")
+async def auto_decision(
     loan_id: str,
+    payload: LoanAutoDecisionRequest,
     auth: AuthContext = Depends(get_current_user)
 ):
     if auth.role != Role.LOAN_MANAGER:
-        raise HTTPException(403)
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    await service.confirm_auto_approved(loan_id, auth.user_id)
-    return {"message": "Auto-approved loan confirmed"}
+    if payload.system_decision == SystemDecision.AUTO_APPROVED:
+        await service.confirm_auto_approved(loan_id, auth.user_id)
+        return {"message": "Loan auto-approved successfully"}
 
-@router.post("/applications/{loan_id}/confirm-reject")
-async def confirm_reject(
-    loan_id: str,
-    auth: AuthContext = Depends(get_current_user)
-):
-    if auth.role != Role.LOAN_MANAGER:
-        raise HTTPException(403)
+    elif payload.system_decision == SystemDecision.AUTO_REJECTED:
+        await service.confirm_auto_rejected(loan_id, auth.user_id)
+        return {"message": "Loan auto-rejected successfully"}
 
-    await service.confirm_auto_rejected(loan_id, auth.user_id)
-    return {"message": "Loan auto-rejected"}
+    raise HTTPException(
+        status_code=400,
+        detail="Invalid system decision"
+    )
+
 
 @router.post("/applications/{loan_id}/escalate")
 async def escalate_loan(
     loan_id: str,
-    payload: dict,
+    payload: LoanEscalationRequest,
     auth: AuthContext = Depends(get_current_user)
 ):
     if auth.role != Role.LOAN_MANAGER:
@@ -79,11 +81,13 @@ async def escalate_loan(
 
     await service.escalate_to_admin(
         loan_id=loan_id,
-        reason=payload["reason"],
+        reason=payload.reason,
         manager_id=auth.user_id
     )
 
     return {"message": "Loan escalated to admin"}
+
+
 
 @router.get("/applications/escalated")
 async def get_escalated_loans(
@@ -115,11 +119,20 @@ async def finalize_loan(
 
     return {"message": "Loan finalized successfully"}
 
-@router.get("/applications/finalizable")
+@router.get("/loan/applications/finalizable")
 async def get_finalizable_loans(
     auth: AuthContext = Depends(get_current_user)
 ):
     if auth.role != Role.LOAN_MANAGER:
-        raise HTTPException(403)
+        raise HTTPException(status_code=403, detail="Access denied")
 
     return await service.list_loans_ready_for_finalization()
+
+# @router.get("/applications/finalizable")
+# async def get_finalizable_loans(
+#     auth: AuthContext = Depends(get_current_user)
+# ):
+#     if auth.role != Role.LOAN_MANAGER:
+#         raise HTTPException(403)
+
+#     return await service.list_loans_ready_for_finalization()

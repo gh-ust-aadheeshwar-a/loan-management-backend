@@ -57,3 +57,8 @@ class LoanApplicationRepository:
             "escalated": True
         }).sort("applied_at", -1)
         return cursor
+    async def update_by_id(self, loan_id: str, update_data: dict):
+        return await self.collection.update_one(
+            {"_id": ObjectId(loan_id)},
+            {"$set": update_data}
+        )

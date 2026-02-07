@@ -11,7 +11,6 @@ from app.enums.role import Role
 router = APIRouter(prefix="/loans", tags=["Loans"])
 service = LoanApplicationService()
 
-
 @router.post("", response_model=LoanApplicationResponse, status_code=201)
 async def apply_loan(
     payload: LoanApplicationCreateRequest,
@@ -55,4 +54,6 @@ async def get_loan(
     if auth.role != Role.USER:
         raise HTTPException(403)
 
+    # router
     return await service.get_loan_application(loan_id)
+

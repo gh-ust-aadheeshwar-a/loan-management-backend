@@ -4,7 +4,8 @@ from app.enums.role import Role
 from app.services.admin_service import AdminService
 from app.schemas.admin_manager import CreateManagerRequest
 from app.schemas.admin_loan_escalation import AdminLoanDecisionRequest
-
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 service = AdminService()
@@ -95,13 +96,22 @@ async def request_user_deletion(
 async def list_loans(auth: AuthContext = Depends(get_current_user)):
     if auth.role != Role.ADMIN:
         raise HTTPException(403)
-    return await service.list_loans()
+    return await service.list_all_loans()
 
 @router.get("/loans/escalated")
-async def escalated_loans(auth: AuthContext = Depends(get_current_user)):
+async def get_escalated_loans(
+    auth: AuthContext = Depends(get_current_user)
+):
     if auth.role != Role.ADMIN:
-        raise HTTPException(403)
-    return await service.get_escalated_loans()
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    loans = await service.list_escalated_loans()
+
+    # 🔐 Force JSON-safe encoding
+    return JSONResponse(
+        status_code=200,
+        content=jsonable_encoder(loans)
+    )
 
 # @router.post("/loans/{loan_id}/escalated-decision")
 # async def decide_escalated_loan(

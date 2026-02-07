@@ -9,7 +9,8 @@ from app.routers.bank_manager import router as bank_manager_router
 from app.routers.loan_manager import router as loan_manager_router
 from app.routers.user import router as user_router
 from app.routers.loan_application import router as loan_router
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from app.scheduler.emi_scheduler import process_due_emis
 
 app = FastAPI(
     title="Loan Management System",
@@ -39,7 +40,9 @@ Access to APIs is enforced using the **role claim inside the JWT**, not by the l
 """,
     version="1.0.0"
 )
-
+scheduler = AsyncIOScheduler()
+scheduler.add_job(process_due_emis, "cron", hour=2)
+scheduler.start()
 # =========================
 # AUTH ROUTERS
 # =========================

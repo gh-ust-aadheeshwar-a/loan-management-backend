@@ -1,6 +1,6 @@
 from datetime import datetime
 from bson import ObjectId
-
+from app.utils.mongo_serializers import serialize_mongo_value
 from app.auth.password import hash_password
 from app.enums.role import Role
 from app.repositories.manager_repository import ManagerRepository
@@ -8,6 +8,7 @@ from app.repositories.user_repository import UserRepository
 from app.repositories.loan_application_repository import LoanApplicationRepository
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.enums.loan import LoanApplicationStatus
+from app.utils.mongo_serializers import serialize_mongo_value
 
 class AdminService:
     def __init__(self):
@@ -119,16 +120,22 @@ class AdminService:
     # ========================
     # LOAN OVERSIGHT
     # ========================
-    async def list_loans(self):
-        cursor = self.loan_repo.collection.find()
-        loans = []
+    async def list_all_loans(self):
+        cursor = self.loan_repo.collection.find({})
+        result = []
 
         async for loan in cursor:
-            loan["_id"] = str(loan["_id"])
-            loan["user_id"] = str(loan["user_id"])
-            loans.append(loan)
+            result.append({
+                "loan_id": str(loan["_id"]),
+                "user_id": str(loan["user_id"]),
+                "loan_amount": serialize_mongo_value(loan.get("loan_amount")),
+                "interest_rate": serialize_mongo_value(loan.get("interest_rate")),
+                "emi_amount": serialize_mongo_value(loan.get("emi_amount")),
+                "status": loan.get("status")
+            })
 
-        return loans
+        return result
+
 
     async def get_escalated_loans(self):
         cursor = self.loan_repo.collection.find({"status": "ESCALATED"})
@@ -181,28 +188,76 @@ class AdminService:
 
 
     async def decide_escalated_loan(
-        self,
-        admin_id: str,
-        loan_id: str,
-        decision,
-        reason: str | None
-    ):
-        loan = await LoanApplicationRepository().find_by_id(loan_id)
+    self,
+    loan_id: str,
+    decision: str,
+    reason: str,
+    admin_id: str
+):
+        loan = await self.loan_repo.find_by_id(loan_id)
+
         if not loan:
             raise ValueError("Loan not found")
 
-        if not loan.get("is_escalated"):
-            raise ValueError("Loan not escalated")
+        # ✅ Admin can act ONLY on escalated loans
+        if loan.get("status") != LoanApplicationStatus.ESCALATED:
+            raise ValueError("Loan is not in escalated state")
 
-        new_status = (
-            LoanApplicationStatus.APPROVED
-            if decision == "APPROVE"
-            else LoanApplicationStatus.REJECTED
-        )
+        # ✅ Decide next state
+        if decision == "APPROVE":
+            new_status = LoanApplicationStatus.ADMIN_APPROVED
+        elif decision == "REJECT":
+            new_status = LoanApplicationStatus.ADMIN_REJECTED
+        else:
+            raise ValueError("Invalid decision")
 
-        await LoanApplicationRepository().update_decision(
+        # ✅ Update loan application
+        await self.loan_repo.update_by_id(
             loan_id,
-            new_status,
-            admin_id,
-            reason
-        )
+    {
+        "status": new_status,
+        "admin_decision": decision,
+        "admin_decision_reason": reason,
+        "admin_decided_by": admin_id,
+        "admin_decided_at": datetime.utcnow()
+    }
+)
+
+        return {"message": f"Loan {decision.lower()}ed by admin"}
+
+    async def list_escalated_loans(self):
+        cursor = self.loan_repo.collection.find({
+            "status": "ESCALATED"
+        })
+
+        response = []
+
+        async for loan in cursor:
+            response.append({
+                "loan_id": str(loan["_id"]),
+                "user_id": str(loan["user_id"]),
+
+                # 🔥 ALWAYS serialize numeric fields
+                "loan_amount": serialize_mongo_value(
+                    loan.get("loan_amount")
+                ),
+                "interest_rate": serialize_mongo_value(
+                    loan.get("interest_rate")
+                ),
+                "emi_amount": serialize_mongo_value(
+                    loan.get("emi_amount")
+                ),
+
+                "status": loan.get("status"),
+                "system_decision": loan.get("system_decision"),
+                "escalated_reason": loan.get("escalated_reason"),
+
+                # Optional – convert datetime to ISO
+                "created_at": (
+                    loan.get("created_at").isoformat()
+                    if loan.get("created_at")
+                    else None
+                )
+            })
+
+        return response

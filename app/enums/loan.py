@@ -8,10 +8,14 @@ class LoanType(str, Enum):
 
 class LoanApplicationStatus(str, Enum):
     PENDING = "PENDING"
-    MANUAL_REVIEW = "MANUAL_REVIEW"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
-    AUTO_REJECTED = "AUTO_REJECTED"
+
+    ESCALATED = "ESCALATED"          # ✅ ADD
+    ADMIN_APPROVED = "ADMIN_APPROVED"
+    ADMIN_REJECTED = "ADMIN_REJECTED"
+
+    FINALIZED = "FINALIZED"
 
 class SystemDecision(str, Enum):
     AUTO_APPROVED = "AUTO_APPROVED"
