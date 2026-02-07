@@ -78,25 +78,25 @@ async def get_user_details(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     
-# @router.post("/users/{user_id}/delete")
-# async def delete_user(
-#     user_id: str,
-#     payload: UserDeleteRequest,
-#     auth: AuthContext = Depends(get_current_user)
-# ):
-#     if auth.role != Role.BANK_MANAGER:
-#         raise HTTPException(status_code=403, detail="Access denied")
+@router.post("/users/{user_id}/delete")
+async def delete_user(
+    user_id: str,
+    payload: UserDeleteRequest,
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role != Role.BANK_MANAGER:
+        raise HTTPException(status_code=403, detail="Access denied")
 
-#     try:
-#         await service.delete_user(
-#             manager_id=auth.user_id,
-#             user_id=user_id,
-#             reason=payload.reason
-#         )
-#     except ValueError as e:
-#         raise HTTPException(status_code=400, detail=str(e))
+    try:
+        await service.delete_user(
+            manager_id=auth.user_id,
+            user_id=user_id,
+            reason=payload.reason
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-#     return {"message": "User deleted successfully"}
+    return {"message": "User deleted successfully"}
 
 
 @router.post("/users/{user_id}/delete/decision")

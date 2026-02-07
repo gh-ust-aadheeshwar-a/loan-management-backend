@@ -1,14 +1,19 @@
 from datetime import datetime
-from bson import Decimal128, ObjectId
+from bson import Decimal128
+import logging
+
 from app.repositories.loan_application_repository import LoanApplicationRepository
-from app.enums.loan import LoanApplicationStatus, SystemDecision
-from app.enums.user import KYCStatus, UserApprovalStatus
 from app.repositories.user_repository import UserRepository
+from app.enums.loan import LoanApplicationStatus
+from app.enums.user import KYCStatus, UserApprovalStatus
+from app.services.credit_rule_service import CreditRuleService
 
+logger = logging.getLogger("loan_origination")
 
-# =====================================================
-# CIBIL CALCULATION
-# =====================================================
+# ===============================
+# CREDIT & FINANCIAL CALCULATIONS
+# ===============================
+
 def calculate_cibil(payload: dict) -> int:
     score = 300
 
@@ -28,38 +33,31 @@ def calculate_cibil(payload: dict) -> int:
     return min(score, 900)
 
 
-def system_decision(cibil: int) -> SystemDecision:
-    if cibil >= 750:
-        return SystemDecision.AUTO_APPROVED
-    elif 550 <= cibil < 750:
-        return SystemDecision.MANUAL_REVIEW
-    return SystemDecision.AUTO_REJECTED
-
-
-# =====================================================
+# ===============================
 # EMI CALCULATION
-# =====================================================
+# ===============================
 def calculate_emi(amount: float, rate: float, tenure: int) -> float:
     amount = float(amount)
     rate = float(rate)
 
     r = rate / (12 * 100)
-
     emi = (amount * r * ((1 + r) ** tenure)) / (((1 + r) ** tenure) - 1)
+
     return round(emi, 2)
 
 
-# =====================================================
+# ===============================
 # LOAN APPLICATION SERVICE
-# =====================================================
+# ===============================
 class LoanApplicationService:
     def __init__(self):
         self.repo = LoanApplicationRepository()
         self.user_repo = UserRepository()
+        self.rule_service = CreditRuleService()
 
-    # -------------------------------------------------
+    # ----------------------------------
     # CREATE LOAN APPLICATION
-    # -------------------------------------------------
+    # ----------------------------------
     async def create_loan_application(
         self,
         user_id: str,
@@ -70,25 +68,29 @@ class LoanApplicationService:
         if not user:
             raise ValueError("User not found")
 
-        await self._validate_user_eligibility(user)
+        # 🚦 Eligibility validation
+        self._validate_user_eligibility(user)
 
+        # 🔁 Idempotency check
         existing = await self.repo.find_by_idempotency_key(idempotency_key)
         if existing:
             return str(existing["_id"]), True
 
+        # 🧠 Credit decision
         cibil = calculate_cibil(payload.dict())
-        decision = system_decision(cibil)
+        decision = await self.rule_service.evaluate_cibil(cibil)
 
-        interest = (
+        # 💰 Interest rate preview
+        interest_rate = (
             8.5 if cibil >= 750 else
             11.5 if cibil >= 650 else
             14.0
         )
 
-        # ✅ FIXED ORDER: amount, rate, tenure
-        emi = calculate_emi(
+        # 💸 EMI preview (FIXED ORDER)
+        emi_preview = calculate_emi(
             payload.loan_amount,
-            interest,
+            interest_rate,
             payload.tenure_months
         )
 
@@ -102,8 +104,9 @@ class LoanApplicationService:
 
             "cibil_score": cibil,
             "system_decision": decision,
-            "interest_rate": Decimal128(str(interest)),
-            "emi_preview": Decimal128(str(emi)),
+
+            "interest_rate": Decimal128(str(interest_rate)),
+            "emi_preview": Decimal128(str(emi_preview)),
 
             "status": LoanApplicationStatus.PENDING,
             "applied_at": datetime.utcnow(),
@@ -111,30 +114,21 @@ class LoanApplicationService:
         }
 
         loan_id = await self.repo.create(loan_doc)
+
+        logger.info(
+            "LOAN_APPLICATION_CREATED",
+            extra={
+                "loan_id": str(loan_id),
+                "user_id": str(user["_id"]),
+                "system_decision": decision
+            }
+        )
+
         return str(loan_id), False
-    async def get_loan(self, loan_id: str):
-        from bson import ObjectId
-        from app.db.mongodb import db
 
-        loan = await db.loans.find_one({"_id": ObjectId(loan_id)})
-        if not loan:
-            raise ValueError("Loan not found")
-
-        return {
-            "loan_id": str(loan["_id"]),
-            "user_id": str(loan["user_id"]),
-            "loan_amount": float(loan["loan_amount"].to_decimal()),
-            "interest_rate": float(loan["interest_rate"]),
-            "tenure_months": loan["tenure_months"],
-            "emi_amount": float(loan["emi_amount"].to_decimal()),
-            "status": loan["status"],
-            "created_at": loan.get("created_at")
-        }
-
-
-    # -------------------------------------------------
+    # ----------------------------------
     # GET LOAN APPLICATION (JSON SAFE)
-    # -------------------------------------------------
+    # ----------------------------------
     async def get_loan_application(self, loan_id: str):
         loan = await self.repo.find_by_id(loan_id)
         if not loan:
@@ -144,20 +138,59 @@ class LoanApplicationService:
             "loan_id": str(loan["_id"]),
             "user_id": str(loan["user_id"]),
             "loan_type": loan.get("loan_type"),
-            "loan_amount": float(loan["loan_amount"].to_decimal()),
-            "tenure_months": loan["tenure_months"],
-            "interest_rate": float(loan["interest_rate"].to_decimal()),
-            "emi_preview": float(loan["emi_preview"].to_decimal()),
-            "cibil_score": loan["cibil_score"],
-            "system_decision": loan["system_decision"],
-            "status": loan["status"],
-            "applied_at": loan.get("applied_at"),
+
+            "loan_amount": str(loan.get("loan_amount"))
+            if isinstance(loan.get("loan_amount"), Decimal128)
+            else loan.get("loan_amount"),
+
+            "tenure_months": loan.get("tenure_months"),
+            "reason": loan.get("reason"),
+            "income_slip_url": loan.get("income_slip_url"),
+
+            "cibil_score": loan.get("cibil_score"),
+            "system_decision": loan.get("system_decision"),
+            "status": loan.get("status"),
+
+            "interest_rate": str(loan.get("interest_rate"))
+            if isinstance(loan.get("interest_rate"), Decimal128)
+            else loan.get("interest_rate"),
+
+            "emi_preview": str(loan.get("emi_preview"))
+            if isinstance(loan.get("emi_preview"), Decimal128)
+            else loan.get("emi_preview"),
+
+            "applied_at": (
+                loan.get("applied_at").isoformat()
+                if loan.get("applied_at")
+                else None
+            )
         }
 
-    # -------------------------------------------------
-    # USER ELIGIBILITY CHECK
-    # -------------------------------------------------
-    async def _validate_user_eligibility(self, user: dict):
+    # ----------------------------------
+    # GET LOAN DECISION (READ ONLY)
+    # ----------------------------------
+    async def get_loan_decision(self, loan_id: str):
+        loan = await self.repo.find_by_id(loan_id)
+        if not loan:
+            raise ValueError("Loan application not found")
+
+        return {
+            "loan_id": str(loan["_id"]),
+            "user_id": str(loan["user_id"]),
+            "system_decision": loan.get("system_decision"),
+            "final_status": loan.get("status"),
+            "decision_reason": loan.get("decision_reason"),
+            "decided_at": (
+                loan.get("decided_at").isoformat()
+                if loan.get("decided_at")
+                else None
+            )
+        }
+
+    # ----------------------------------
+    # ELIGIBILITY VALIDATION
+    # ----------------------------------
+    def _validate_user_eligibility(self, user: dict):
         if user["kyc_status"] != KYCStatus.COMPLETED:
             raise ValueError("KYC not completed")
 

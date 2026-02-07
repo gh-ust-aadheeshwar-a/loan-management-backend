@@ -7,6 +7,7 @@ from app.schemas.loan_application import (
 from app.services.loan_application_service import LoanApplicationService
 from app.auth.dependencies import get_current_user, AuthContext
 from app.enums.role import Role
+from app.schemas.loan_decision_query import LoanDecisionResponse
 
 router = APIRouter(prefix="/loans", tags=["Loans"])
 service = LoanApplicationService()
@@ -57,3 +58,31 @@ async def get_loan(
     # router
     return await service.get_loan_application(loan_id)
 
+<<<<<<< HEAD
+=======
+@router.get(
+    "/{loan_id}/decision",
+    response_model=LoanDecisionResponse,
+    summary="Get loan decision details"
+)
+async def get_loan_decision(
+    loan_id: str,
+    auth: AuthContext = Depends(get_current_user)
+):
+    if auth.role == Role.BANK_MANAGER:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        decision = await service.get_loan_decision(loan_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # 🔐 OWNERSHIP CHECK (CRITICAL)
+    if auth.role == Role.USER and decision["user_id"] != auth.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Remove internal field before response
+    decision.pop("user_id")
+
+    return decision
+>>>>>>> 47d395c (rule config decision query api)
